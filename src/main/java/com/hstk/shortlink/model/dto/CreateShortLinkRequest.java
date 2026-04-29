@@ -16,6 +16,7 @@ public class CreateShortLinkRequest {
      @URL(message = "原始链接格式不对")
      private String originalUrl;
 
+     
      @Future(message = "过期时间必须是未来时间")
      @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
      private LocalDateTime expireTime;
