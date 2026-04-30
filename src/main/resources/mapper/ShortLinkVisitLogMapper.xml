@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+
+<mapper namespace="com.hstk.shortlink.mapper.ShortLinkVisitLogMapper">
+    <insert id="insert" parameterType="com.hstk.shortlink.model.entity.ShortLinkVisitLog">
+        INSERT INTO short_link_visit_log(
+            short_code,
+            ip,
+            user_agent,
+            referer
+        )VALUES(
+            #{shortCode},
+            #{ip},
+            #{userAgent},
+            #{referer}
+        )
+    </insert>
+
+    <select id="selectRecentByShortCode" resultType="com.hstk.shortlink.model.entity.ShortLinkVisitLog">
+        SELECT
+            id,
+            short_code as shortCode,
+            ip,
+            user_agent as userAgent,
+            referer,
+            create_time as createTime
+        FROM short_link_visit_log
+        WHERE short_code=#{shortCode}
+        ORDER BY create_time DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="countTodayByShortCode" resultType="java.lang.Long">
+        SELECT count(*)
+        FROM short_link_visit_log
+        WHERE short_code=#{shortCode}
+            AND create_time >= CURDATE()
+            AND create_time &lt; DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+    </select>
+</mapper>
