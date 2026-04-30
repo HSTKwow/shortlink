@@ -30,8 +30,8 @@ public class ShortLinkController {
 
     @PostMapping("/api/short-links")
     public ApiResponse<Map<String, String>> createShortLink(@Valid @RequestBody CreateShortLinkRequest request){
+        //log.info("post");
         String shortCode=shortLinkService.createShortLink(request.getOriginalUrl(),request.getExpireTime());
-        log.info("post");
         return ApiResponse.success(Map.of(
                 "shortCode",shortCode,
                 "shortUrl","http://localhost:8080/"+shortCode
@@ -41,7 +41,7 @@ public class ShortLinkController {
     @GetMapping("/{shortCode}")
     public ResponseEntity<Void> redirect(@PathVariable String shortCode,
                                          HttpServletRequest request){
-        log.info("get");
+        //log.info("get");
         String ip=request.getRemoteAddr();
         String userAgent=request.getHeader("User-Agent");
         String referer=request.getHeader("Referer");
@@ -63,16 +63,15 @@ public class ShortLinkController {
     @PatchMapping("/api/short-links/{shortCode}/status")
     public ApiResponse<Void> updateStatus(@PathVariable String shortCode,
                                           @Valid @RequestBody UpdateShortLinkStatusRequest request){
-        shortLinkService.updateStatus(shortCode,request.getStatus());
         //log.info("updateStatus");
+        shortLinkService.updateStatus(shortCode,request.getStatus());
         return ApiResponse.success(null);
     }
 
     @GetMapping("/api/short-links/{shortCode}/visits")
     public ApiResponse<List<ShortLinkVisitLog>>getVisitLogs(@PathVariable String shortCode,
                                                             @RequestParam(required = false) Integer limit){
-       //log.info("get visits");
-
+        //log.info("get visits");
         List<ShortLinkVisitLog> shortLinkVisitLogs=shortLinkService.getVisitLogs(shortCode,limit);
         return ApiResponse.success(shortLinkVisitLogs);
 
@@ -83,7 +82,6 @@ public class ShortLinkController {
                                                              @RequestParam(required = false)Integer pageSize,
                                                              @RequestParam(required = false)Integer status){
         PageResult<ShortLink>result=shortLinkService.listShortLinks(page,pageSize,status);
-
         return ApiResponse.success(result);
 
     }

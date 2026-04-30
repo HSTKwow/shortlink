@@ -16,14 +16,13 @@ public interface ShortLinkService {
     String getOriginalUrl(String shortCode,String ip,String userAgent,String referer);
     //更新短码状态
     void updateStatus(String shortCode,Integer status);
-    //查找该短码的最近访问信息
-    List<ShortLinkVisitLog>getVisitLogs(String shortCode,Integer limit);
-    //按照短码来查找详细信息
+    //查找短码
     ShortLink getShortLink(String shortCode);
     //分页查找短码详细信息
     PageResult<ShortLink>listShortLinks(Integer page,Integer pageSize,Integer status);
-    //统计该短链的信息
+
+    //查找该短码的最近访问日志
+    List<ShortLinkVisitLog>getVisitLogs(String shortCode,Integer limit);
+   //统计该短链的信息
     ShortLinkStatsResponse getStats(String shortCode);
-
-
 }

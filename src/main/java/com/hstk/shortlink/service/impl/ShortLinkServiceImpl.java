@@ -9,9 +9,12 @@ import com.hstk.shortlink.model.dto.ShortLinkStatsResponse;
 import com.hstk.shortlink.model.entity.ShortLink;
 import com.hstk.shortlink.model.entity.ShortLinkVisitLog;
 import com.hstk.shortlink.service.ShortLinkService;
+import com.hstk.shortlink.service.VisitLogService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -22,7 +25,14 @@ public class ShortLinkServiceImpl implements ShortLinkService {
 
     private final ShortLinkMapper shortLinkMapper;
     private final ShortLinkVisitLogMapper shortLinkVisitLogMapper;
+    private final VisitLogService visitLogService;
 
+    private static final String REDIRECT_CACHE_PREFIX="shortlink:redirect:";
+    private static final String NULL_CACHE_VALUE="__NULL__";
+
+    private final StringRedisTemplate stringRedisTemplate;
+
+    //生成短码
     private String generateShortCode() {
         return UUID.randomUUID().
                 toString().
@@ -30,6 +40,7 @@ public class ShortLinkServiceImpl implements ShortLinkService {
                 substring(0, 6);
     }
 
+    //生成为一短码
     private String generateUniqueShortCode(){
         for(int i=0;i<5;i++){
             String shortCode=generateShortCode();
@@ -42,9 +53,52 @@ public class ShortLinkServiceImpl implements ShortLinkService {
         throw new BusinessException(500,"短链码生成失效，请稍后重试");
     }
 
-    public ShortLinkServiceImpl(ShortLinkMapper shortLinkMapper, ShortLinkVisitLogMapper shortLinkVisitLogMapper) {
+    //写入redis
+    private void cacheShortLink(String cacheKey,ShortLink shortLink){
+        try {
+            if (shortLink.getExpireTime() != null) {
+                //log.info(LocalDateTime.now().toString());
+                Duration ttl = Duration.between(LocalDateTime.now(), shortLink.getExpireTime());
+                if (!ttl.isNegative() && !ttl.isZero()) {
+                    stringRedisTemplate.opsForValue().set(cacheKey, shortLink.getOriginalUrl(), ttl);
+                }
+
+            } else {
+                stringRedisTemplate.opsForValue().set(cacheKey, shortLink.getOriginalUrl(), Duration.ofHours(24));
+            }
+        } catch (Exception e) {
+            log.warn("write redis fail",e);
+        }
+
+    }
+
+    //检查访问次数
+    private void checkRateLimit(String shortCode,String ip){
+        try{
+            String key="shortlink:rate:"+shortCode+":"+ip;
+            Long count=stringRedisTemplate.opsForValue().increment(key);
+            //log.info("一秒内访问次数:"+count);
+            //第一次访问就设置cache存活时间
+            if(count!=null&&count==1){
+                stringRedisTemplate.expire(key,Duration.ofSeconds(1));
+            }
+            //在存活期内大量访问
+            if(count!=null&&count>10){
+                throw new BusinessException(429,"访问过于频繁");
+            }
+        }catch (BusinessException e){
+            throw e;
+        }catch (Exception e){
+            log.warn("redis rate limit fail",e);
+        }
+    }
+
+    //构造函数
+    public ShortLinkServiceImpl(ShortLinkMapper shortLinkMapper, ShortLinkVisitLogMapper shortLinkVisitLogMapper, VisitLogService visitLogService, StringRedisTemplate stringRedisTemplate) {
         this.shortLinkMapper = shortLinkMapper;
         this.shortLinkVisitLogMapper = shortLinkVisitLogMapper;
+        this.visitLogService = visitLogService;
+        this.stringRedisTemplate = stringRedisTemplate;
     }
 
     @Override
@@ -65,34 +119,52 @@ public class ShortLinkServiceImpl implements ShortLinkService {
 
     @Override
     public String getOriginalUrl(String shortCode, String ip, String userAgent, String referer) {
-        ShortLink shortLink=shortLinkMapper.selectByShortCode(shortCode);
+        checkRateLimit(shortCode,ip);
+        String cacheKey=REDIRECT_CACHE_PREFIX+shortCode;
+        String cacheValue=null;
 
+        try{//防止redis出错
+            cacheValue=stringRedisTemplate.opsForValue().get(cacheKey);
+        }catch (Exception e){
+            log.warn("redis get fail,shortcode={}",shortCode,e);
+        }
+
+        if(NULL_CACHE_VALUE.equals(cacheValue)){
+            throw new BusinessException(404,"短链不存在");
+        }
+
+        //redis命中
+        if(cacheValue!=null){
+            log.info("redis命中");
+            visitLogService.recordVisitAsync(shortCode,ip,userAgent,referer);
+            return cacheValue;
+        }
+        //未命中
+        ShortLink shortLink=shortLinkMapper.selectByShortCode(shortCode);
         if(shortLink==null){
+            log.info("空链缓存");
+            try {//空链也缓存到redis
+                stringRedisTemplate.opsForValue().set(cacheKey,NULL_CACHE_VALUE,Duration.ofMinutes(5));
+            } catch (Exception e) {
+                log.warn("redis write fail",e);
+            }
             throw new BusinessException(404,"短链不存在");
         }
 
         if(Integer.valueOf(0).equals(shortLink.getStatus())){
             throw new BusinessException(403,"短链已禁用");
         }
-
-
         if(shortLink.getExpireTime()!=null&&LocalDateTime.now().isAfter(shortLink.getExpireTime())){
             throw new BusinessException(410,"短链已过期");
         }
 
-        shortLinkMapper.increaseVisitCount(shortCode);
+        log.info("redis未命中");
+        cacheShortLink(cacheKey,shortLink);
+        //异步添加访问记录
+        visitLogService.recordVisitAsync(shortCode,ip,userAgent,referer);
 
-        //添加访问记录
-        ShortLinkVisitLog shortLinkVisitLog=new ShortLinkVisitLog();
-        shortLinkVisitLog.setShortCode(shortCode);
-        shortLinkVisitLog.setIp(ip);
-        shortLinkVisitLog.setUserAgent(userAgent);
-        shortLinkVisitLog.setReferer(referer);
-
-        shortLinkVisitLogMapper.insert(shortLinkVisitLog);
 
         return shortLink.getOriginalUrl();
-
     }
 
     @Override
@@ -108,7 +180,14 @@ public class ShortLinkServiceImpl implements ShortLinkService {
             throw new BusinessException(400,"状态值不合法");
         }
 
+        //先更新数据库，在删除缓存，防止读到就缓存
         shortLinkMapper.updateStatus(shortCode,status);
+        try {//删除redis缓存
+            stringRedisTemplate.delete(REDIRECT_CACHE_PREFIX + shortCode);
+        } catch (Exception e) {
+            log.warn("redis delete fail", e);
+        }
+        log.info("redis缓存已清除");
 
     }
 
