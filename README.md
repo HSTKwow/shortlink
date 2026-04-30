@@ -1,0 +1,400 @@
+# Short Link System
+
+A Spring Boot backend project for generating and managing short links. It supports short link creation, 302 redirect, expiration control, enable/disable status, access logging, visit statistics, and paginated management queries.
+
+## Tech Stack
+
+- Java 17
+- Spring Boot 4
+- Spring MVC
+- MyBatis
+- MySQL
+- Validation
+- Lombok
+- Maven
+
+## Features
+
+- Create short links from original URLs.
+- Redirect short links to original URLs with HTTP 302.
+- Support optional expiration time for short links.
+- Enable or disable short links by status.
+- Validate request parameters with `@Valid`.
+- Return unified API responses with `ApiResponse`.
+- Handle business and validation errors through a global exception handler.
+- Record visit logs including IP, User-Agent, Referer, and visit time.
+- Query recent visit logs for a short link.
+- Query short link statistics including total visits and today's visits.
+- Query short link list with pagination and optional status filtering.
+
+## Project Structure
+
+```text
+src/main/java/com/hstk/shortlink
+├── common
+│   ├── ApiResponse.java
+│   ├── BusinessException.java
+│   ├── GlobalExceptionHandler.java
+│   └── PageResult.java
+├── controller
+│   └── ShortLinkController.java
+├── mapper
+│   ├── ShortLinkMapper.java
+│   └── ShortLinkVisitLogMapper.java
+├── model
+│   ├── dto
+│   │   ├── CreateShortLinkRequest.java
+│   │   ├── ShortLinkStatsResponse.java
+│   │   └── UpdateShortLinkStatusRequest.java
+│   └── entity
+│       ├── ShortLink.java
+│       └── ShortLinkVisitLog.java
+└── service
+    ├── ShortLinkService.java
+    └── impl
+        └── ShortLinkServiceImpl.java
+```
+
+## Database
+
+Create database:
+
+```sql
+CREATE DATABASE IF NOT EXISTS short_link_system
+DEFAULT CHARACTER SET utf8mb4
+COLLATE utf8mb4_unicode_ci;
+```
+
+Create short link table:
+
+```sql
+CREATE TABLE short_link (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    short_code VARCHAR(32) NOT NULL UNIQUE,
+    original_url TEXT NOT NULL,
+    status TINYINT DEFAULT 1,
+    expire_time DATETIME DEFAULT NULL,
+    visit_count BIGINT DEFAULT 0,
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+```
+
+Create visit log table:
+
+```sql
+CREATE TABLE short_link_visit_log (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    short_code VARCHAR(32) NOT NULL,
+    ip VARCHAR(64),
+    user_agent VARCHAR(512),
+    referer VARCHAR(512),
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+Recommended indexes:
+
+```sql
+CREATE INDEX idx_short_link_visit_log_code_time
+ON short_link_visit_log(short_code, create_time);
+```
+
+## Configuration
+
+The project reads the database password from environment variables.
+
+`src/main/resources/application.properties`:
+
+```properties
+spring.application.name=short-link-system
+server.port=8080
+
+spring.datasource.url=jdbc:mysql://localhost:3306/short_link_system?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8&allowPublicKeyRetrieval=true
+spring.datasource.username=${DB_USERNAME:root}
+spring.datasource.password=${DB_PASSWORD}
+spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
+
+mybatis.configuration.map-underscore-to-camel-case=true
+mybatis.mapper-locations=classpath:mapper/*.xml
+```
+
+Set environment variables before running:
+
+```bash
+export DB_USERNAME=root
+export DB_PASSWORD=your_mysql_password
+```
+
+In IntelliJ IDEA, add the same variables in:
+
+```text
+Run/Debug Configurations -> Environment variables
+```
+
+Example:
+
+```text
+DB_USERNAME=root;DB_PASSWORD=your_mysql_password
+```
+
+## Run
+
+Start MySQL and make sure the database tables have been created.
+
+Then run:
+
+```bash
+./mvnw spring-boot:run
+```
+
+The service starts on:
+
+```text
+http://localhost:8080
+```
+
+## API
+
+### Create Short Link
+
+```http
+POST /api/short-links
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "originalUrl": "https://www.baidu.com",
+  "expireTime": "2026-05-01 12:00:00"
+}
+```
+
+`expireTime` is optional. If it is not provided, the short link does not expire.
+
+Response:
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "shortCode": "abc123",
+    "shortUrl": "http://localhost:8080/abc123"
+  }
+}
+```
+
+### Redirect
+
+```http
+GET /{shortCode}
+```
+
+Example:
+
+```text
+GET http://localhost:8080/abc123
+```
+
+If the short link exists, is enabled, and has not expired, the server returns:
+
+```http
+302 Found
+Location: https://www.baidu.com
+```
+
+### Get Short Link Detail
+
+```http
+GET /api/short-links/{shortCode}
+```
+
+Response:
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "id": 1,
+    "shortCode": "abc123",
+    "originalUrl": "https://www.baidu.com",
+    "status": 1,
+    "expireTime": "2026-05-01T12:00:00",
+    "visitCount": 3,
+    "createTime": "2026-04-30T13:00:00",
+    "updateTime": "2026-04-30T13:00:00"
+  }
+}
+```
+
+### Update Short Link Status
+
+```http
+PATCH /api/short-links/{shortCode}/status
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "status": 0
+}
+```
+
+Status values:
+
+```text
+1: enabled
+0: disabled
+```
+
+Response:
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": null
+}
+```
+
+### Query Visit Logs
+
+```http
+GET /api/short-links/{shortCode}/visits?limit=20
+```
+
+Response:
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "id": 1,
+      "shortCode": "abc123",
+      "ip": "127.0.0.1",
+      "userAgent": "Mozilla/5.0 ...",
+      "referer": null,
+      "createTime": "2026-04-30T13:20:00"
+    }
+  ]
+}
+```
+
+### Query Short Link List
+
+```http
+GET /api/short-links?page=1&pageSize=10&status=1
+```
+
+`status` is optional.
+
+Response:
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "records": [
+      {
+        "id": 1,
+        "shortCode": "abc123",
+        "originalUrl": "https://www.baidu.com",
+        "status": 1,
+        "expireTime": "2026-05-01T12:00:00",
+        "visitCount": 3,
+        "createTime": "2026-04-30T13:00:00",
+        "updateTime": "2026-04-30T13:00:00"
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "pageSize": 10
+  }
+}
+```
+
+### Query Statistics
+
+```http
+GET /api/short-links/{shortCode}/stats
+```
+
+Response:
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "shortCode": "abc123",
+    "originalUrl": "https://www.baidu.com",
+    "status": 1,
+    "totalVisitCount": 3,
+    "todayVisitCount": 2
+  }
+}
+```
+
+## Error Response
+
+The project uses a unified response structure for business and validation errors.
+
+Example:
+
+```json
+{
+  "code": 404,
+  "message": "短链不存在",
+  "data": null
+}
+```
+
+Common error codes:
+
+```text
+400: invalid request parameter
+403: short link disabled
+404: short link not found
+410: short link expired
+500: server error
+```
+
+## Core Flow
+
+```text
+Create:
+originalUrl -> generate shortCode -> save to MySQL -> return shortUrl
+
+Redirect:
+shortCode -> query MySQL -> check status and expiration -> increase visit count -> save visit log -> return 302 Location
+
+Statistics:
+shortCode -> query short_link.visit_count -> count today's visit logs -> return stats response
+```
+
+## Roadmap
+
+- Add Redis cache for high-frequency redirect queries.
+- Add cache penetration protection for nonexistent short codes.
+- Delete Redis cache when a short link is disabled or updated.
+- Add asynchronous visit log writing with thread pool or message queue.
+- Add Docker Compose for MySQL, Redis, and the backend service.
+
+## Resume Description
+
+```text
+基于 Spring Boot + MyBatis 实现短链系统，支持短链创建、302 跳转、过期控制、启用禁用、访问日志、访问统计和分页查询。
+
+在短链跳转链路中记录访问 IP、User-Agent、Referer 和访问时间，并支持访问明细查询和当日访问次数统计。
+
+设计统一返回结构、参数校验和全局异常处理机制，提升接口响应一致性和异常可维护性。
+```
