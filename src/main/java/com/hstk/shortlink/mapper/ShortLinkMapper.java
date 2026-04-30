@@ -14,7 +14,7 @@ public interface ShortLinkMapper {
 
     int increaseVisitCount(@Param("shortCode")String shortCode);
 
-    int updateStatus(@Param("shortCode")String shortCode, @Param("status")Integer Status);
+    int updateStatus(@Param("shortCode")String shortCode, @Param("status")Integer status);
 
     List<ShortLink>selectPage(@Param("status") Integer status,@Param("offset") Integer offset,@Param("pageSize")Integer pageSize);
 

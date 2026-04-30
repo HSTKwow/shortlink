@@ -79,9 +79,9 @@ public class ShortLinkController {
     }
 
     @GetMapping("/api/short-links")
-    public ApiResponse<PageResult<ShortLink>>listShotLinks(@RequestParam(required = false)Integer page,
-                                                           @RequestParam(required = false)Integer pageSize,
-                                                           @RequestParam(required = false)Integer status){
+    public ApiResponse<PageResult<ShortLink>> listShortLinks(@RequestParam(required = false)Integer page,
+                                                             @RequestParam(required = false)Integer pageSize,
+                                                             @RequestParam(required = false)Integer status){
         PageResult<ShortLink>result=shortLinkService.listShortLinks(page,pageSize,status);
 
         return ApiResponse.success(result);
