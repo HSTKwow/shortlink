@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.hstk.shortlink.mapper.ShortLinkMapper">
+    <insert id="insert" parameterType="com.hstk.shortlink.model.entity.ShortLink">
+        INSERT INTO short_link(
+            short_code,
+            original_url,
+            status,
+            expire_time,
+            visit_count
+        )VALUES(
+            #{shortCode},
+            #{originalUrl},
+            #{status},
+            #{expireTime},
+            #{visitCount}
+        )
+    </insert>
+
+    <select id="selectByShortCode" resultType="com.hstk.shortlink.model.entity.ShortLink">
+        SELECT
+            id,
+            short_code AS shortCode,
+            original_url AS originalUrl,
+            status,
+            expire_time AS expireTime,
+            visit_count AS visitCount,
+            create_time AS createTime,
+            update_time AS updateTime
+        FROM short_link
+        WHERE short_code = #{shortCode}
+    </select>
+
+    <select id="selectPage" resultType="com.hstk.shortlink.model.entity.ShortLink">
+        SELECT
+            id,
+            short_code AS shortCode,
+            original_url AS originalUrl,
+            status,
+            expire_time AS expireTime,
+            visit_count AS visitCount,
+            create_time AS createTime,
+        update_time AS updateTime
+        FROM short_link
+        <where>
+                <if test="status!=null">
+                    AND status=#{status}
+                </if>
+        </where>
+        ORDER BY create_time DESC
+        LIMIT #{offset},#{pageSize}
+    </select>
+
+    <select id="countPage" resultType="java.lang.Long">
+        SELECT count(*)
+        FROM short_link
+        <where>
+            <if test="status != null">
+                AND status=#{status}
+            </if>
+        </where>
+
+    </select>
+
+    <update id="increaseVisitCount">
+        UPDATE short_link
+        SET visit_count = visit_count + 1
+        WHERE short_code = #{shortCode}
+    </update>
+
+    <update id="updateStatus">
+        UPDATE short_link
+        SET status=#{status}
+        WHERE short_code=#{shortCode}
+    </update>
+
+
+</mapper>
