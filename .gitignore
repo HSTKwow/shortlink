@@ -15,6 +15,9 @@ target/
 
 .DS_Store
 
+.env
+*.sql
+
 ### IntelliJ IDEA ###
 .idea
 *.iws
