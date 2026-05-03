@@ -131,8 +131,8 @@
                     </execution>
                 </executions>
                 <configuration>
-                    <source>18</source>
-                    <target>18</target>
+                    <source>${java.version}</source>
+                    <target>${java.version}</target>
                 </configuration>
             </plugin>
         </plugins>

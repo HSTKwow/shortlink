@@ -8,8 +8,8 @@ import com.hstk.shortlink.mapper.ShortLinkVisitLogMapper;
 import com.hstk.shortlink.model.dto.ShortLinkStatsResponse;
 import com.hstk.shortlink.model.entity.ShortLink;
 import com.hstk.shortlink.model.entity.ShortLinkVisitLog;
+import com.hstk.shortlink.mq.VisitLogProducer;
 import com.hstk.shortlink.service.ShortLinkService;
-import com.hstk.shortlink.service.VisitLogService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -25,12 +25,13 @@ public class ShortLinkServiceImpl implements ShortLinkService {
 
     private final ShortLinkMapper shortLinkMapper;
     private final ShortLinkVisitLogMapper shortLinkVisitLogMapper;
-    private final VisitLogService visitLogService;
 
     private static final String REDIRECT_CACHE_PREFIX="shortlink:redirect:";
     private static final String NULL_CACHE_VALUE="__NULL__";
 
     private final StringRedisTemplate stringRedisTemplate;
+
+    private final VisitLogProducer visitLogProducer;
 
     //生成短码
     private String generateShortCode() {
@@ -94,11 +95,11 @@ public class ShortLinkServiceImpl implements ShortLinkService {
     }
 
     //构造函数
-    public ShortLinkServiceImpl(ShortLinkMapper shortLinkMapper, ShortLinkVisitLogMapper shortLinkVisitLogMapper, VisitLogService visitLogService, StringRedisTemplate stringRedisTemplate) {
+    public ShortLinkServiceImpl(ShortLinkMapper shortLinkMapper, ShortLinkVisitLogMapper shortLinkVisitLogMapper, StringRedisTemplate stringRedisTemplate, VisitLogProducer visitLogProducer) {
         this.shortLinkMapper = shortLinkMapper;
         this.shortLinkVisitLogMapper = shortLinkVisitLogMapper;
-        this.visitLogService = visitLogService;
         this.stringRedisTemplate = stringRedisTemplate;
+        this.visitLogProducer = visitLogProducer;
     }
 
     @Override
@@ -136,7 +137,7 @@ public class ShortLinkServiceImpl implements ShortLinkService {
         //redis命中
         if(cacheValue!=null){
             log.info("redis命中");
-            visitLogService.recordVisitAsync(shortCode,ip,userAgent,referer);
+            visitLogProducer.sendVisitLog(shortCode,ip,userAgent,referer);
             return cacheValue;
         }
         //未命中
@@ -161,7 +162,7 @@ public class ShortLinkServiceImpl implements ShortLinkService {
         log.info("redis未命中");
         cacheShortLink(cacheKey,shortLink);
         //异步添加访问记录
-        visitLogService.recordVisitAsync(shortCode,ip,userAgent,referer);
+        visitLogProducer.sendVisitLog(shortCode,ip,userAgent,referer);
 
 
         return shortLink.getOriginalUrl();

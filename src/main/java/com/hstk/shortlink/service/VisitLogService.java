@@ -18,8 +18,8 @@ public class VisitLogService {
         this.shortLinkVisitLogMapper = shortLinkVisitLogMapper;
     }
 
-    @Async("visitLogExecutor")
-    public void recordVisitAsync(String shortCode,String ip,String userAgent,String referer){
+
+    public void recordVisit(String shortCode,String ip,String userAgent,String referer){
         try{
             shortLinkMapper.increaseVisitCount(shortCode);
 
