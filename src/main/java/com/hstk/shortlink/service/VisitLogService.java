@@ -33,6 +33,7 @@ public class VisitLogService {
 
         }catch (Exception e){
             log.error("record visit log failed, shortCode={}", shortCode, e);
+            throw e;
         }
     }
 

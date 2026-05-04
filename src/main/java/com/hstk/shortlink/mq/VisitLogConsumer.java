@@ -23,9 +23,10 @@ public class VisitLogConsumer {
         visitLogService.recordVisit(
                 message.getShortCode(),
                 message.getIp(),
-                    message.getUserAgent(),
+                message.getUserAgent(),
                 message.getReferer()
         );
+        //throw new RuntimeException("test mq retry");
     }
 
 }

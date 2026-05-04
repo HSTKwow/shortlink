@@ -1,6 +1,6 @@
 # 短链系统
 
-基于 Spring Boot 实现的短链接服务。系统支持长链接生成短码、短链 302 跳转、过期控制、启用禁用、访问限流、Redis 缓存、RabbitMQ 异步访问日志、访问统计和分页查询。
+基于 Spring Boot 实现的短链接服务。系统支持长链接生成短码、短链 302 跳转、过期控制、启用禁用、访问限流、Redis 缓存、RabbitMQ 异步访问日志、消费失败重试、死信队列、访问统计和分页查询。
 
 
 ## 技术栈
@@ -27,6 +27,8 @@
 - 访问限流：基于 Redis 统计短时间内的访问次数，限制高频请求。
 - Redis 降级：Redis 操作失败时记录日志，主流程继续回源 MySQL。
 - RabbitMQ 异步日志：跳转请求只投递访问日志消息，消费者异步写入访问记录。
+- 消费失败重试：访问日志消费失败时由 Spring AMQP 监听容器按配置自动重试。
+- 死信队列：重试耗尽后拒绝消息并进入死信队列，避免失败消息直接丢失。
 - 访问统计：支持总访问量、今日访问量、最近访问日志查询。
 - 统一响应：接口返回统一 `ApiResponse` 结构。
 - 全局异常：业务异常、参数校验异常、系统异常统一处理。
@@ -103,6 +105,17 @@ src/main/java/com/hstk/shortlink
 -> VisitLogConsumer 消费消息
 -> VisitLogService 更新访问次数
 -> 写入 short_link_visit_log 表
+```
+
+如果消费者处理失败：
+
+```text
+VisitLogConsumer 抛出异常
+-> Spring AMQP 监听容器触发重试
+-> 重试耗尽
+-> 拒绝消息并且不重新入主队列
+-> RabbitMQ 根据主队列死信参数转发消息
+-> 消息进入 shortlink.visit.log.dlq
 ```
 
 当前访问日志异步化使用 RabbitMQ，线程池异步方案不再作为主链路。
@@ -284,10 +297,20 @@ ttl:   1 秒
 
 RabbitMQ 用于异步处理访问日志，避免跳转接口直接等待数据库写日志完成。
 
+正常访问日志链路：
+
 ```text
 exchange:    shortlink.visit.exchange
 queue:       shortlink.visit.log.queue
 routing key: shortlink.visit.log
+```
+
+死信链路：
+
+```text
+dead exchange:    shortlink.visit.dlx
+dead queue:       shortlink.visit.log.dlq
+dead routing key: shortlink.visit.dead
 ```
 
 生产者：
@@ -307,6 +330,34 @@ VisitLogConsumer
 -> 插入 short_link_visit_log
 ```
 
+消费失败处理：
+
+```text
+消费者抛异常
+-> 监听容器按配置重试
+-> 重试耗尽
+-> RejectAndDontRequeueRecoverer 拒绝消息
+-> requeue=false，消息不回到主队列
+-> RabbitMQ 根据主队列 deadLetterExchange 和 deadLetterRoutingKey 转发到死信队列
+```
+
+主队列通过死信参数关联死信交换机：
+
+```java
+QueueBuilder.durable(VISIT_LOG_QUEUE)
+        .deadLetterExchange(VISIT_LOG_DLX)
+        .deadLetterRoutingKey(VISIT_LOG_DEAD_ROUTING_KEY)
+        .build();
+```
+
+死信交换机通过绑定关系把失败消息路由到死信队列：
+
+```text
+shortlink.visit.dlx
+-> routing key: shortlink.visit.dead
+-> shortlink.visit.log.dlq
+```
+
 消息对象使用 JSON 转换器，避免 Java 原生序列化带来的安全限制和跨版本问题。
 
 如果修改过消息转换器后，队列里还残留旧的 Java 序列化消息，可以清空队列：
@@ -314,6 +365,14 @@ VisitLogConsumer
 ```bash
 rabbitmqctl purge_queue shortlink.visit.log.queue
 ```
+
+如果做死信队列测试后需要清理测试消息：
+
+```bash
+rabbitmqctl purge_queue shortlink.visit.log.dlq
+```
+
+注意：RabbitMQ 队列参数创建后不能直接修改。如果给已有队列新增或修改死信参数，需要先在 RabbitMQ 管理后台删除旧队列，再重启项目让 Spring 重新声明队列。
 
 ## 启动项目
 
@@ -567,8 +626,17 @@ GET /api/short-links/{shortCode}/stats
 - 使用 Redis 实现简单限流，保护短链跳转接口。
 - Redis 操作增加异常捕获，Redis 故障时主链路可回源 MySQL。
 - 使用 RabbitMQ 解耦跳转流程和访问日志写入，提高跳转接口响应速度。
+- 为 RabbitMQ 消费端配置失败重试和死信队列，避免消费者异常时失败消息直接丢失。
 - 使用统一响应结构和全局异常处理，提高接口可维护性。
 - 使用 MyBatis XML 管理 SQL，便于针对访问统计场景优化查询。
+
+## 后续优化
+
+- 生产者 Confirm：确认访问日志消息是否成功到达 RabbitMQ，处理生产者发送阶段的失败。
+- 消息幂等：为访问日志消息增加 `messageId`，数据库增加唯一索引，避免 RabbitMQ 重复投递导致访问次数重复增加。
+- 死信补偿：增加死信消费者或失败消息表，记录死信消息并支持后续人工排查、补偿重投。
+- 短码生成优化：使用数据库自增 ID 或分布式 ID 结合 Base62 编码，降低随机短码冲突概率。
+- URL 安全校验：限制内网地址、非法协议和过长 URL，提高接口安全性。
 
 ## 简历描述参考
 
@@ -578,6 +646,8 @@ GET /api/short-links/{shortCode}/stats
 引入 Redis 缓存短链映射，设计空链缓存和基于短码/IP 的访问限流，并对 Redis 异常进行降级处理，保证缓存故障时主流程可回源数据库。
 
 引入 RabbitMQ 异步处理访问日志，将跳转请求与数据库写日志解耦，消费者异步更新访问次数并写入访问日志表，降低跳转接口耗时。
+
+为 RabbitMQ 消费端配置失败重试和死信队列，消费者写库异常时先自动重试，重试耗尽后消息进入死信队列，便于后续排查和补偿。
 
 设计统一返回结构、参数校验和全局异常处理机制，提升接口响应一致性和系统可维护性。
 ```
